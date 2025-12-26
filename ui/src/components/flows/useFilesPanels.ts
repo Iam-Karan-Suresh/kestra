@@ -1,5 +1,5 @@
 import {h, markRaw, provide, Ref} from "vue"
-import EditorWrapper, {EditorTabProps, FILES_SET_DIRTY_INJECTION_KEY, FILES_UPDATE_CONTENT_INJECTION_KEY} from "../inputs/EditorWrapper.vue";
+import EditorWrapper, {EditorTabProps, FILES_SET_DIRTY_INJECTION_KEY, FILES_UPDATE_CONTENT_INJECTION_KEY,FILES_CHECK_EXISTS_INJECTION_KEY} from "../inputs/EditorWrapper.vue";
 import TypeIcon from "../utils/icons/Type.vue";
 import {EditorElement, Panel, Tab, TabLive} from "../../utils/multiPanelTypes";
 import {FILES_CLOSE_TAB_INJECTION_KEY, FILES_OPEN_TAB_INJECTION_KEY} from "../inputs/FileExplorer.vue";
@@ -7,6 +7,8 @@ import {FILES_SAVE_ALL_INJECTION_KEY} from "../inputs/EditorButtonsWrapper.vue";
 import {useNamespacesStore} from "../../override/stores/namespaces";
 import {usePanelDefaultSize} from "../../composables/usePanelDefaultSize";
 import {useFlowStore} from "../../stores/flow";
+import {useFileExplorerStore} from "../../stores/fileExplorer";
+
 
 export const CODE_PREFIX = "code"
 
@@ -70,6 +72,25 @@ export function useFilesPanels(panels: Ref<Panel[]>, namespace: Ref<string | und
     }
 
     const flowStore = useFlowStore();
+    const filesStore = useFileExplorerStore();
+    // Provide checkFileExists function
+provide(FILES_CHECK_EXISTS_INJECTION_KEY, (path: string): boolean => {
+    if (!path || !filesStore.fileTree) return false;
+    
+    function searchTree(nodes: any[], targetPath: string): boolean {
+        for (const node of nodes) {
+            const nodePath = filesStore.getPath(node.id) ?? "";
+            if (nodePath === targetPath) return true;
+            
+            if (node.children && Array.isArray(node.children)) {
+                if (searchTree(node.children, targetPath)) return true;
+            }
+        }
+        return false;
+    }
+    
+    return searchTree(filesStore.fileTree, path);
+});
 
     provide(FILES_OPEN_TAB_INJECTION_KEY, (tab) => {
         if(!tab.path){

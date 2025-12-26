@@ -364,9 +364,9 @@
 </template>
 
 <script lang="ts">
-    import {InjectionKey} from "vue";
+    import {InjectionKey, provide} from "vue";
     import {EditorTabProps} from "./EditorWrapper.vue";
-
+    import {FILES_CHECK_EXISTS_INJECTION_KEY} from "./EditorWrapper.vue";
     export const FILES_OPEN_TAB_INJECTION_KEY = Symbol("files-open-tab-injection-key") as InjectionKey<(tab: EditorTabProps) => void>;
     export const FILES_CLOSE_TAB_INJECTION_KEY = Symbol("files-close-tab-injection-key") as InjectionKey<(tab: {path: string}) => void>;
 </script>
@@ -421,6 +421,12 @@
     const namespacesStore = useNamespacesStore();
     const filesStore = useFileExplorerStore();
 
+    onMounted(() => {
+        console.warn("FileExplorer mounted");
+        console.warn("Provided checkFileExists");
+
+        // ... rest of your onMounted code
+    });
     watch(
         () => props.currentNS,
         (newNS) => {
@@ -467,7 +473,6 @@
     const toast = useToast();
 
     const namespaceId = computed<string>(() => props.currentNS ?? route.params.namespace as string);
-
     const multiSelected = computed(() => selectedNodes.value.length > 1);
 
     const confirmationLabels = computed(() => {
@@ -480,6 +485,91 @@
         return labels;
     });
 
+    
+    function checkFileExists(path: string): boolean {
+        if (!path || !filesStore.fileTree) return false;
+        
+        // Recursively search the file tree
+        function searchTree(nodes: TreeNode[], targetPath: string): boolean {
+            for (const node of nodes) {
+                const nodePath = filesStore.getPath(node.id) ?? "";
+
+                // Exact match
+                if (nodePath === targetPath) {
+                    return true;
+                }
+
+                // Search in children if it's a directory
+                if (isDirectory(node) && node.children) {
+                    if (searchTree(node.children, targetPath)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        return searchTree(filesStore.fileTree, path);
+    }
+    // Provide the file existence checker to child components
+    provide(FILES_CHECK_EXISTS_INJECTION_KEY, checkFileExists);
+
+    // Store previous file paths to detect deletions
+    const previousFilePaths = ref<Set<string>>(new Set());
+
+    
+
+    // Watch file tree changes and notify open tabs
+    watch(
+        () => filesStore.fileTree,
+        (newTree) => {
+            if (!newTree) {
+                return;
+            }
+
+            // Get all current file paths from new tree
+            const currentFilePaths = new Set<string>();
+            
+            function collectFilePaths(nodes: TreeNode[]) {
+                for (const node of nodes) {
+                    if (node.leaf) {
+                        const path = filesStore.getPath(node.id);
+                        if (path) currentFilePaths.add(path);
+                    }
+                    if (isDirectory(node) && node.children) {
+                        collectFilePaths(node.children);
+                    }
+                }
+            }
+
+            collectFilePaths(newTree);
+
+            // If we have a previous snapshot, compare to find deleted files
+            if (previousFilePaths.value.size > 0) {
+                const deletedFiles: string[] = [];
+
+                previousFilePaths.value.forEach(oldPath => {
+                    if (!currentFilePaths.has(oldPath)) {
+                        deletedFiles.push(oldPath);
+                    }
+                });
+
+                // Close tabs for deleted files
+                if (deletedFiles.length > 0) {
+                    deletedFiles.forEach(path => {
+                        closeTab?.({path});
+                    });
+                }
+            }
+
+            // Update the snapshot for next comparison
+            previousFilePaths.value = currentFilePaths;
+        },
+        {deep: true}
+    );
+
+
+    
     function nodeClass(data: any) {
         if (selectedNodes.value.includes(data.id)) {
             return "node selected-tree-node";
