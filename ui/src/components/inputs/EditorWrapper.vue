@@ -108,7 +108,6 @@
 
     const route = useRoute();
     const router = useRouter();
-
     const flowStore = useFlowStore();
 
     const cursor = ref();
@@ -140,13 +139,7 @@
     const savedSource = computed(() => props.flow ? flowStore.flowYamlOrigin : savedSourceNS.value);
     
 
-    onMounted(() => {
-        console.warn("EditorWrapper mounted");
-        console.warn("checkFileExists available?", !!checkFileExists);
-        console.warn("closeTab available?", !!closeTab);
     
-    // ... rest of your onMounted code
-    });
     // Watch for file existence - close tab if file is deleted
     watch(() => props.path, async (newPath) => {
         if (!newPath || props.flow) return;
@@ -214,10 +207,9 @@
                 if (exists === false) {
                     closeTab?.({path: props.path});
                 }
-            }, 2000); // Check every 2 seconds
+            }, 500); 
         }
     });
-
     const LANGS_WITH_WORKERS_MAP = {
         yaml: "yaml",
         yml: "yaml",

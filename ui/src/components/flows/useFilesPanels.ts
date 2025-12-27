@@ -1,5 +1,5 @@
-import {h, markRaw, provide, Ref} from "vue"
-import EditorWrapper, {EditorTabProps, FILES_SET_DIRTY_INJECTION_KEY, FILES_UPDATE_CONTENT_INJECTION_KEY,FILES_CHECK_EXISTS_INJECTION_KEY} from "../inputs/EditorWrapper.vue";
+import {h, markRaw, provide, Ref, watch} from "vue"
+import EditorWrapper, {EditorTabProps, FILES_SET_DIRTY_INJECTION_KEY, FILES_UPDATE_CONTENT_INJECTION_KEY, FILES_CHECK_EXISTS_INJECTION_KEY} from "../inputs/EditorWrapper.vue";
 import TypeIcon from "../utils/icons/Type.vue";
 import {EditorElement, Panel, Tab, TabLive} from "../../utils/multiPanelTypes";
 import {FILES_CLOSE_TAB_INJECTION_KEY, FILES_OPEN_TAB_INJECTION_KEY} from "../inputs/FileExplorer.vue";
@@ -8,7 +8,6 @@ import {useNamespacesStore} from "../../override/stores/namespaces";
 import {usePanelDefaultSize} from "../../composables/usePanelDefaultSize";
 import {useFlowStore} from "../../stores/flow";
 import {useFileExplorerStore} from "../../stores/fileExplorer";
-
 
 export const CODE_PREFIX = "code"
 
@@ -73,24 +72,74 @@ export function useFilesPanels(panels: Ref<Panel[]>, namespace: Ref<string | und
 
     const flowStore = useFlowStore();
     const filesStore = useFileExplorerStore();
-    // Provide checkFileExists function
-provide(FILES_CHECK_EXISTS_INJECTION_KEY, (path: string): boolean => {
-    if (!path || !filesStore.fileTree) return false;
-    
-    function searchTree(nodes: any[], targetPath: string): boolean {
-        for (const node of nodes) {
-            const nodePath = filesStore.getPath(node.id) ?? "";
-            if (nodePath === targetPath) return true;
+
+    // Helper function to check if file exists in the file tree
+    function checkFileExists(path: string): boolean {
+        if (!path || !filesStore.fileTree) return false;
+        
+        function searchTree(nodes: any[], targetPath: string): boolean {
+            for (const node of nodes) {
+                const nodePath = filesStore.getPath(node.id) ?? "";
+                if (nodePath === targetPath) return true;
+                
+                if (node.children && Array.isArray(node.children)) {
+                    if (searchTree(node.children, targetPath)) return true;
+                }
+            }
+            return false;
+        }
+        
+        return searchTree(filesStore.fileTree, path);
+    }
+
+    // Function to clean up stale tabs (tabs for deleted files)
+    function cleanupStaleTabs() {
+        if (!filesStore.fileTree) return;
+        
+        for (const panel of panels.value) {
+            const tabsToRemove: string[] = [];
             
-            if (node.children && Array.isArray(node.children)) {
-                if (searchTree(node.children, targetPath)) return true;
+            for (const tab of panel.tabs) {
+                // Skip Flow.yaml tab (it's special)
+                if (tab.uid === CODE_PREFIX) continue;
+                
+                // Check if this is a file tab
+                if (tab.uid.startsWith(`${CODE_PREFIX}-`)) {
+                    const filePath = tab.uid.substring(5); // Remove "code-" prefix
+                    
+                    // Check if file still exists
+                    if (!checkFileExists(filePath)) {
+                        tabsToRemove.push(tab.uid);
+                    }
+                }
+            }
+            
+            // Remove all stale tabs
+            if (tabsToRemove.length > 0) {
+                panel.tabs = panel.tabs.filter(t => !tabsToRemove.includes(t.uid));
             }
         }
-        return false;
     }
-    
-    return searchTree(filesStore.fileTree, path);
-});
+
+    // Provide checkFileExists function to child components
+    provide(FILES_CHECK_EXISTS_INJECTION_KEY, checkFileExists);
+
+    // Watch file tree changes and cleanup stale tabs
+    watch(
+        () => filesStore.fileTree,
+        () => {
+            cleanupStaleTabs();
+        },
+        {deep: true}
+    );
+
+    // Watch namespace changes and cleanup tabs
+    watch(
+        () => namespace.value,
+        () => {
+            cleanupStaleTabs();
+        }
+    );
 
     provide(FILES_OPEN_TAB_INJECTION_KEY, (tab) => {
         if(!tab.path){
@@ -171,7 +220,7 @@ provide(FILES_CHECK_EXISTS_INJECTION_KEY, (path: string): boolean => {
                 });
             }
         }
-        if(files.length > 0){
+        if(files.length > 0) {
             // parallelize saving of files
             await Promise.all(
                 files.map(file => namespacesStore.saveOrCreateFile(file.file)
